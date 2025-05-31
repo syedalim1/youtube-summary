@@ -101,6 +101,20 @@ Transcript: ${fullTranscript.substring(0, 10000)}
     });
   } catch (error) {
     console.error("Error:", error.message);
+    
+    // Handle specific transcript disabled error
+    if (error.message.includes("Transcript is disabled")) {
+      return new Response(
+        JSON.stringify({
+          error: "Transcripts are disabled for this video. Please try a different YouTube video.",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+    
     return new Response(
       JSON.stringify({
         error: "Something went wrong while processing the video",
