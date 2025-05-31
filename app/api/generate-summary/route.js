@@ -1,41 +1,31 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { YoutubeTranscript } from "youtube-transcript";
 
-const genAI = new GoogleGenerativeAI("AIzaSyAXP4kBBXRl6vgqsVYGXm9XNzAozjZnnt8");
+const genAI = new GoogleGenerativeAI(
+  process.env.GEMINI_API_KEY || "AIzaSyAXP4kBBXRl6vgqsVYGXm9XNzAozjZnnt8"
+);
 
 export async function POST(req) {
   const { url } = await req.json();
 
   if (!url) {
-    return new Response(JSON.stringify({ error: "YouTube URL is required" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: "YouTube URL is required" }, 400);
   }
 
   try {
     const videoId = extractVideoId(url);
     if (!videoId) {
-      return new Response(
-        JSON.stringify({ error: "Invalid YouTube URL format" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      return jsonResponse({ error: "Invalid YouTube URL format" }, 400);
     }
 
     const transcript = await YoutubeTranscript.fetchTranscript(videoId);
 
     if (!transcript || transcript.length === 0) {
-      return new Response(
-        JSON.stringify({
-          error: "No transcript found. Enable captions on the video.",
-        }),
+      return jsonResponse(
         {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
+          error: "No transcript found. Enable captions on the video.",
+        },
+        400
       );
     }
 
@@ -70,12 +60,13 @@ Transcript: ${fullTranscript.substring(0, 10000)}
     const result = await model.generateContent(prompt);
     let text = (await result.response).text().trim();
 
+    // Clean markdown if Gemini gives code block
     if (text.startsWith("```json"))
       text = text
         .replace(/^```json/, "")
         .replace(/```$/, "")
         .trim();
-    if (text.startsWith("```"))
+    else if (text.startsWith("```"))
       text = text.replace(/^```/, "").replace(/```$/, "").trim();
 
     let summaryData;
@@ -83,47 +74,39 @@ Transcript: ${fullTranscript.substring(0, 10000)}
       summaryData = JSON.parse(text);
     } catch (e) {
       console.error("JSON parse error:", e);
-      return new Response(
-        JSON.stringify({
+      return jsonResponse(
+        {
           error: "Failed to parse Gemini response as JSON",
           raw: text,
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
+        },
+        500
       );
     }
 
-    return new Response(JSON.stringify(summaryData), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonResponse(summaryData);
   } catch (error) {
     console.error("Error:", error.message);
-    
-    // Handle specific transcript disabled error
-    if (error.message.includes("Transcript is disabled")) {
-      return new Response(
-        JSON.stringify({
-          error: "Transcripts are disabled for this video. Please try a different YouTube video.",
-        }),
+
+    // ✅ Handles all types of transcript errors gracefully
+    if (
+      error.message.includes("Transcript is disabled") ||
+      error.message.includes("transcript is not available")
+    ) {
+      return jsonResponse(
         {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
+          error:
+            "Transcripts are disabled for this video. Please try a different YouTube video.",
+        },
+        400
       );
     }
-    
-    return new Response(
-      JSON.stringify({
+
+    return jsonResponse(
+      {
         error: "Something went wrong while processing the video",
         message: error.message,
-      }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
+      },
+      500
     );
   }
 }
@@ -131,4 +114,11 @@ Transcript: ${fullTranscript.substring(0, 10000)}
 function extractVideoId(url) {
   const match = url.match(/(?:youtube\.com.*[?&]v=|youtu\.be\/)([^"&?/ ]{11})/);
   return match ? match[1] : null;
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
